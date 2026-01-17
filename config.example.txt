@@ -1,0 +1,19 @@
+# Token del bot de Discord
+BOT_TOKEN=tu_token_aqui
+
+# URL base del GDPS (para imágenes/recursos)
+HOSTING=http://localhost/
+
+# Configuración de base de datos MySQL
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=tu_usuario
+DB_PASSWORD=tu_contraseña
+DB_NAME=nombre_base_datos
+
+# ID del canal de log (opcional, para recibir logs de comandos ejecutados)
+CHANNEL_LOG=
+
+# ID del servidor de Discord (opcional, para registro inmediato de slash commands)
+# Si no se especifica, los comandos se registran globalmente (puede tardar hasta 1 hora)
+GUILD_ID=

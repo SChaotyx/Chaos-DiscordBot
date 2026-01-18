@@ -1,7 +1,34 @@
 const { Client, GatewayIntentBits, Collection, Events, REST, Routes, MessageFlags } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 require('dotenv').config();
+
+// Crear servidor HTTP simple para health check (permite que cron jobs externos mantengan activo el bot)
+function startHealthCheckServer() {
+    const PORT = process.env.PORT || 3000;
+    
+    const server = http.createServer((req, res) => {
+        if (req.url === '/health' || req.url === '/') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+                status: 'OK', 
+                uptime: process.uptime(),
+                timestamp: new Date().toISOString()
+            }));
+        } else {
+            res.writeHead(404);
+            res.end('Not Found');
+        }
+    });
+    
+    server.listen(PORT, () => {
+        console.log(`🌐 Health check server running on port ${PORT}`);
+        console.log(`📍 Endpoint disponible: /health`);
+    });
+    
+    return server;
+}
 
 // Crear el cliente de Discord
 const client = new Client({
@@ -187,6 +214,9 @@ function validateEnvironment() {
 // Iniciar bot
 async function startBot() {
     validateEnvironment();
+    
+    // Iniciar servidor HTTP para health check (necesario para cron jobs externos)
+    startHealthCheckServer();
     
     // Probar conexión a la base de datos
     const db = require('./utils/database');

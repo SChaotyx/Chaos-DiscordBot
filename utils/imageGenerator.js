@@ -2,8 +2,16 @@ const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
 const path = require('path');
 const db = require('./database');
+require('dotenv').config();
 
 const resourcesPath = path.join(__dirname, '../resources');
+
+// Quality settings from environment variables
+// If variable is undefined (not set), use 'hd' (medium quality) as default
+// If variable is empty string '', use '' (low quality)
+// Otherwise use the specified value ('uhd', 'hd', or '')
+const ICON_PROFILE_QUALITY = process.env.ICON_PROFILE_QUALITY !== undefined ? process.env.ICON_PROFILE_QUALITY : 'hd';
+const ICON_SET_QUALITY = process.env.ICON_SET_QUALITY !== undefined ? process.env.ICON_SET_QUALITY : 'hd';
 
 /**
  * Genera thumbnail de dificultad de un nivel (replica diffthumbnail de PHP)
@@ -100,10 +108,15 @@ function tintImage(canvas, color) {
  * Genera un icono de perfil de usuario desde los assets del juego
  * Genera el icono principal que el usuario tiene equipado según su iconType e icon
  * @param {number} accountID - ID de la cuenta (extID) del usuario
+ * @param {string|null} imageRes - Calidad de imagen ('uhd', 'hd', '' para baja, o null para usar ICON_PROFILE_QUALITY). Por defecto usa variable de entorno
  * @returns {Promise<Buffer|null>} Buffer de la imagen PNG del icono o null si el usuario no existe
  * @throws {Error} Si hay error al generar el icono o cargar assets
  */
-async function generateProfileIcon(accountID) {
+async function generateProfileIcon(accountID, imageRes = null) {
+    // Use environment variable if imageRes is not provided
+    if (imageRes === null) {
+        imageRes = ICON_PROFILE_QUALITY;
+    }
     try {
         const user = await db.queryOne(
             'SELECT iconType, icon, color1, color2, color3, accGlow FROM users WHERE extID = ?',
@@ -112,16 +125,21 @@ async function generateProfileIcon(accountID) {
 
         if (!user) return null;
 
-        const iconArray = await generateIcon(user.iconType, user.icon, user.color1, user.color2, user.color3, user.accGlow == 1, null, false);
+        // Use buildIcon (handles both multipart and simple icons) with specified quality
+        const iconImage = await buildIcon(
+            user.iconType,
+            user.icon,
+            user.color1,
+            user.color2,
+            user.color3,
+            user.accGlow == 1,
+            imageRes
+        );
 
-        if (!iconArray) return null;
-
-        // For normal icons, 'full' will exist. For multipart (robot/spider), it won't.
-        const icon = iconArray['full'] || Object.values(iconArray)[0];
-        if (!icon) return null;
+        if (!iconImage) return null;
 
         // Return buffer directly
-        return icon.toBuffer('image/png');
+        return iconImage.toBuffer('image/png');
     } catch (error) {
         console.error(`Error generando icono de perfil ${accountID}:`, error);
         return null;
@@ -129,41 +147,120 @@ async function generateProfileIcon(accountID) {
 }
 
 /**
- * Genera el conjunto completo de iconos de perfil (todos los tipos excepto el equipado)
- * Muestra todos los iconos secundarios del usuario (ship, ball, bird, etc.) en una sola imagen
- * @param {number} accountID - ID de la cuenta (extID) del usuario
+ * Genera el conjunto completo de iconos de perfil
+ * Muestra todos los iconos del usuario (ship, ball, bird, etc.) en una sola imagen
+ * @param {number|null} accountID - ID de la cuenta (extID) del usuario, o null para usar parámetros personalizados
+ * @param {string|null} imageRes - Calidad de imagen ('uhd', 'hd', '' para baja, o null para usar ICON_SET_QUALITY). Por defecto usa variable de entorno
+ * @param {boolean} includeJetpack - Si incluir el jetpack (tipo 8) en el conjunto. Por defecto false
+ * @param {Object|null} customParams - Parámetros personalizados cuando accountID es null: { accs: {0: icon, 1: ship, ...}, color1, color2, color3, glow, iconType }
+ * @param {boolean} excludeEquipped - Si excluir el icono equipado del conjunto. Por defecto false (incluir todos)
  * @returns {Promise<Buffer|null>} Buffer de la imagen PNG con todos los iconos o null si hay error
  * @throws {Error} Si hay error al generar los iconos o cargar assets
  */
-async function generateProfileIconSet(accountID) {
+async function generateProfileIconSet(accountID = null, imageRes = null, includeJetpack = false, customParams = null, excludeEquipped = false) {
+    // Use environment variable if imageRes is not provided
+    if (imageRes === null) {
+        imageRes = ICON_SET_QUALITY;
+    }
     try {
-        const user = await db.queryOne('SELECT * FROM users WHERE extID = ?', [accountID]);
-        if (!user) return null;
+        let glow, accs, color1, color2, color3, iconType;
+        
+        if (accountID !== null) {
+            // Get user data from database
+            const user = await db.queryOne('SELECT * FROM users WHERE extID = ?', [accountID]);
+            if (!user) return null;
 
-        const glow = user.accGlow == 1;
-        const accs = {
-            0: user.accIcon,
-            1: user.accShip,
-            2: user.accBall,
-            3: user.accBird,
-            4: user.accDart,
-            5: user.accRobot,
-            6: user.accSpider,
-            7: user.accSwing
-        };
-
-        const iconsToDraw = [];
-        for (const [type, iconID] of Object.entries(accs)) {
-            if (parseInt(type) != user.iconType) {
-                iconsToDraw.push({ type: parseInt(type), iconID });
-            }
+            glow = user.accGlow == 1;
+            color1 = user.color1;
+            color2 = user.color2;
+            color3 = user.color3;
+            iconType = user.iconType;
+            // Ensure all types have valid iconIDs (use 1 as default if null/0)
+            accs = {
+                0: user.accIcon || 1,
+                1: user.accShip || 1,
+                2: user.accBall || 1,
+                3: user.accBird || 1,
+                4: user.accDart || 1,
+                5: user.accRobot || 1,
+                6: user.accSpider || 1,
+                7: user.accSwing || 1,
+                8: user.accJetpack || 1
+            };
+        } else if (customParams) {
+            // Use custom parameters
+            glow = customParams.glow || false;
+            color1 = customParams.color1;
+            color2 = customParams.color2;
+            color3 = customParams.color3;
+            iconType = customParams.iconType || 0;
+            accs = customParams.accs || {};
+        } else {
+            return null; // Need either accountID or customParams
         }
 
-        const iconW = 100;
-        const iconH = 115;
-        const sideMargin = 5;
-        const canvasW = (iconsToDraw.length * iconW) + (sideMargin * 2);
-        const canvasH = iconH;
+        const iconsToDraw = [];
+        // Define all icon types that should be included
+        // For iconset: types 0-7 (player, ship, ball, bird, dart, robot, spider, swing)
+        // For iconsetfull: types 0-8 (all including jetpack)
+        const maxType = includeJetpack ? 8 : 7;
+        
+        for (let typeInt = 0; typeInt <= maxType; typeInt++) {
+            // Skip the equipped icon type only if excludeEquipped is true (e.g., when shown as thumbnail in profile)
+            if (excludeEquipped && typeInt === iconType) {
+                continue;
+            }
+            // Get iconID from accs, use 1 as default if not found or is 0/null
+            let iconID = accs[typeInt] || accs[String(typeInt)];
+            // Ensure we have a valid iconID (at least 1)
+            if (!iconID || iconID === 0) {
+                iconID = 1;
+            }
+            iconsToDraw.push({ type: typeInt, iconID });
+        }
+
+        // Calculate canvas dimensions based on horizontal alignment
+        // Spacing scales with quality: base 25 for HD (x2), so x1 = 12.5, x2 = 25, x4 = 50
+        // PHP: $iconSpacing = (int)($baseSpacing * ($qualityScale / 2.0));
+        let qualityScale = 2.0; // Default to HD (x2)
+        if (imageRes === '') {
+            qualityScale = 1.0; // Low quality (x1)
+        } else if (imageRes === 'uhd') {
+            qualityScale = 4.0; // UHD quality (x4)
+        } else if (imageRes === 'hd') {
+            qualityScale = 2.0; // HD quality (x2)
+        }
+        const baseSpacing = 25; // Base spacing for HD (x2)
+        const iconSpacing = Math.floor(baseSpacing * (qualityScale / 2.0)); // Scale spacing based on quality (use floor like PHP (int))
+        
+        let maxIconHeight = 0;
+        let totalWidth = 0;
+        const iconImages = [];
+        
+        // First pass: get all icon images and calculate dimensions
+        for (const { type, iconID } of iconsToDraw) {
+            // Use buildIcon (handles both multipart and simple icons) with medium quality
+            const iconImage = await buildIcon(type, iconID, color1, color2, color3, glow, imageRes);
+            
+            if (iconImage) {
+                const pW = iconImage.width;
+                const pH = iconImage.height;
+                iconImages.push({
+                    image: iconImage,
+                    width: pW,
+                    height: pH
+                });
+                if (pH > maxIconHeight) {
+                    maxIconHeight = pH;
+                }
+                totalWidth += pW;
+            }
+        }
+        
+        // Calculate total canvas width: sum of all icon widths + spacing between them (no side margins)
+        const iconCount = iconImages.length;
+        const canvasW = totalWidth + (iconSpacing * (iconCount - 1));
+        const canvasH = maxIconHeight; // Height is the tallest icon
 
         const canvas = createCanvas(canvasW, canvasH);
         const ctx = canvas.getContext('2d');
@@ -171,22 +268,20 @@ async function generateProfileIconSet(accountID) {
         // Fill transparent background
         ctx.clearRect(0, 0, canvasW, canvasH);
 
-        let currentX = sideMargin;
-        for (const { type, iconID } of iconsToDraw) {
-            const iconResult = await generateIcon(type, iconID, user.color1, user.color2, user.color3, glow, 1, false);
-            if (!iconResult) continue;
-
-            const parts = iconResult['full'] ? [iconResult['full']] : Object.values(iconResult);
-            for (const part of parts) {
-                if (part) {
-                    const pW = part.width;
-                    const pH = part.height;
-                    const posY = (canvasH - pH) / 2;
-                    const offsetX = (iconW - pW) / 2;
-                    ctx.drawImage(part, currentX + offsetX, posY, pW, pH);
-                }
-            }
-            currentX += iconW;
+        // Align icons horizontally with spacing (no side margins)
+        let currentX = 0;
+        for (const iconData of iconImages) {
+            const iconImage = iconData.image;
+            const pW = iconData.width;
+            const pH = iconData.height;
+            
+            // Align vertically (center in canvas height)
+            const offsetY = (canvasH - pH) / 2;
+            
+            ctx.drawImage(iconImage, currentX, offsetY, pW, pH);
+            
+            // Move to next position (icon width + spacing)
+            currentX += pW + iconSpacing;
         }
 
         // Return buffer directly
@@ -207,11 +302,12 @@ async function generateProfileIconSet(accountID) {
  * @param {number} color3Id - ID del color de glow desde la paleta
  * @param {boolean} glowEnabled - Si el glow debe renderizarse (acGlow)
  * @param {number|null} targetPart - Para iconos multiparte (robot/spider), qué parte renderizar (null = todas)
- * @param {boolean} saveImage - Si guardar la imagen en disco (no usado actualmente, mantiene compatibilidad)
+ * @param {boolean} glowOnly - Si solo renderizar capas de glow (para robots/arañas)
+ * @param {string|null} imageRes - Calidad de imagen ('uhd', 'hd', '' para baja, o null para auto-detección)
  * @returns {Promise<Object|false>} Objeto con los iconos generados { 'full': Canvas, '01': Canvas, ... } o false si hay error
  * @throws {Error} Si los archivos PLIST/PNG no existen o hay error al parsear
  */
-async function generateIcon(iconType, id, color1Id, color2Id, color3Id, glowEnabled, targetPart, saveImage) {
+async function generateIcon(iconType, id, color1Id, color2Id, color3Id, glowEnabled, targetPart, glowOnly = false, imageRes = null) {
     try {
         // Load color palette
         const colorsJson = fs.readFileSync(path.join(resourcesPath, 'colors.json'), 'utf8');
@@ -227,10 +323,39 @@ async function generateIcon(iconType, id, color1Id, color2Id, color3Id, glowEnab
         const formattedId = String(id).padStart(2, '0');
         const baseName = `${typeName}_${formattedId}`;
 
-        const plistFile = path.join(resourcesPath, 'icons', `${baseName}-hd.plist`);
-        const spriteSheetFile = path.join(resourcesPath, 'icons', `${baseName}-hd.png`);
-
-        if (!fs.existsSync(plistFile) || !fs.existsSync(spriteSheetFile)) {
+        // Determinar qué calidad usar
+        // Si imageRes es null, usar calidad media (hd) por defecto
+        let plistFile = null;
+        let spriteSheetFile = null;
+        
+        // Default to 'hd' (medium quality) if imageRes is null
+        const qualityToUse = imageRes !== null ? imageRes : 'hd';
+        
+        // Usar calidad específica solicitada
+        const qualitySuffix = qualityToUse === '' ? '' : '-' + qualityToUse;
+        const testPlist = path.join(resourcesPath, 'icons', `${baseName}${qualitySuffix}.plist`);
+        const testPng = path.join(resourcesPath, 'icons', `${baseName}${qualitySuffix}.png`);
+        
+        if (fs.existsSync(testPlist) && fs.existsSync(testPng)) {
+            plistFile = testPlist;
+            spriteSheetFile = testPng;
+        } else {
+            // Fallback: si no existe la calidad solicitada, intentar auto-detección
+            const qualities = ['-hd', '', '-uhd']; // Prefer hd, then low, then uhd
+            
+            for (const quality of qualities) {
+                const fallbackPlist = path.join(resourcesPath, 'icons', `${baseName}${quality}.plist`);
+                const fallbackPng = path.join(resourcesPath, 'icons', `${baseName}${quality}.png`);
+                
+                if (fs.existsSync(fallbackPlist) && fs.existsSync(fallbackPng)) {
+                    plistFile = fallbackPlist;
+                    spriteSheetFile = fallbackPng;
+                    break;
+                }
+            }
+        }
+        
+        if (!plistFile || !spriteSheetFile) {
             return false;
         }
 
@@ -314,20 +439,34 @@ async function generateIcon(iconType, id, color1Id, color2Id, color3Id, glowEnab
             let order = 4;
             let tint = c1;
             let useTint = true;
+            const isGlow = n.includes('_glow_');
 
-            if (n.includes('_glow_')) {
-                if (!glowEnabled) continue;
-                order = 1;
-                tint = c3;
-            } else if (n.includes('_3_')) {
-                order = 2;
-                useTint = false;
-            } else if (n.includes('_2_')) {
-                order = 3;
-                tint = c2;
-            } else if (n.includes('extra')) {
-                order = 5;
-                useTint = false;
+            if (isGlow) {
+                // Glow layer handling
+                if (!glowEnabled) continue; // Skip if glow not enabled
+                if (glowOnly) {
+                    // glowOnly mode: only process glow layers
+                    order = 1;
+                    tint = c3;
+                } else {
+                    // Normal mode: include glow layers normally
+                    order = 1;
+                    tint = c3;
+                }
+            } else {
+                // Non-glow layer handling
+                if (glowOnly) continue; // Skip non-glow in glowOnly mode
+                
+                if (n.includes('_3_')) {
+                    order = 2;
+                    useTint = false;
+                } else if (n.includes('_2_')) {
+                    order = 3;
+                    tint = c2;
+                } else if (n.includes('extra')) {
+                    order = 5;
+                    useTint = false;
+                }
             }
 
             // Parse textureRect - PHP: $rect = explode(',', str_replace(['{','}',' '], '', $data['textureRect']));
@@ -487,6 +626,681 @@ async function generateIcon(iconType, id, color1Id, color2Id, color3Id, glowEnab
         console.error(`Error generando icono type=${iconType} id=${id}:`, error);
         return false;
     }
+}
+
+/**
+ * Helper function to parse a Vector2 string like "{x, y}" into an object
+ * @param {string} vectorString - The vector string to parse
+ * @returns {{x: number, y: number}} An object with x and y keys
+ */
+function parseVector2(vectorString) {
+    const cleaned = vectorString.replace(/[{}\s]/g, '');
+    const parts = cleaned.split(',');
+    return {
+        x: parseFloat(parts[0] || 0),
+        y: parseFloat(parts[1] || 0)
+    };
+}
+
+/**
+ * Crops an image to its edges, removing all transparent space around it
+ * @param {Canvas} image - The canvas to crop
+ * @returns {Canvas} The cropped canvas (or original if no crop needed)
+ */
+function cropToEdges(image) {
+    const cropData = getCropBounds(image);
+    if (!cropData) {
+        return image; // Return original if no content found
+    }
+    
+    // Check if crop is needed
+    const w = image.width;
+    const h = image.height;
+    if (cropData.x === 0 && cropData.y === 0 && 
+        cropData.width === w && cropData.height === h) {
+        return image; // No crop needed
+    }
+    
+    const cropped = createCanvas(cropData.width, cropData.height);
+    const ctx = cropped.getContext('2d');
+    ctx.clearRect(0, 0, cropData.width, cropData.height);
+    
+    ctx.drawImage(image, cropData.x, cropData.y, cropData.width, cropData.height, 
+                  0, 0, cropData.width, cropData.height);
+    
+    return cropped;
+}
+
+/**
+ * Gets the bounding box of non-transparent pixels in an image
+ * @param {Canvas} image - The canvas to analyze
+ * @returns {{x: number, y: number, width: number, height: number}|null} Bounding box or null if fully transparent
+ */
+function getCropBounds(image) {
+    const w = image.width;
+    const h = image.height;
+    const ctx = image.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+    
+    let minX = w;
+    let maxX = 0;
+    let minY = h;
+    let maxY = 0;
+    let hasContent = false;
+    
+    // Find bounding box of non-transparent pixels
+    // PHP uses: if ($rgba['alpha'] < 125) - very strict threshold
+    // Alpha in GD: 0 (opaque) to 127 (transparent)
+    // Alpha in Canvas: 0 (transparent) to 255 (opaque)
+    // Conversion: GD alpha 0-127 maps to Canvas alpha 255-0 (inverted)
+    // GD alpha < 125 means "not fully transparent" = "has some opacity"
+    // In GD: alpha 0 = fully opaque, alpha 127 = fully transparent
+    // In Canvas: alpha 0 = fully transparent, alpha 255 = fully opaque
+    // To convert: Canvas alpha = 255 - (GD alpha * 255 / 127)
+    // GD alpha 124 (not fully transparent) ≈ Canvas alpha 2 (almost transparent but visible)
+    // So we check: alpha > 2 to detect visible pixels (not fully transparent)
+    const alphaThreshold = 2; // Equivalent to GD's alpha < 125 (not fully transparent = visible)
+    for (let y = h - 1; y >= 0; y--) {
+        for (let x = 0; x < w; x++) {
+            const idx = (y * w + x) * 4;
+            const alpha = data[idx + 3];
+            // Consider pixels that are not fully transparent (alpha > threshold for strict detection)
+            // In Canvas, alpha 0 = fully transparent, alpha 255 = fully opaque
+            // PHP checks alpha < 125 (in GD, 0-127 scale), which means not fully transparent = visible
+            // In Canvas (0-255), this translates to alpha > 2 (approximately)
+            if (alpha > alphaThreshold) {
+                hasContent = true;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+    
+    if (!hasContent) {
+        return null;
+    }
+    
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    
+    // Ensure minimum size
+    if (width < 1 || height < 1) {
+        return null;
+    }
+    
+    return {
+        x: minX,
+        y: minY,
+        width: width,
+        height: height
+    };
+}
+
+/**
+ * Applies transformations (scale, rotation, flip) to a piece image
+ * @param {Canvas} image - The source canvas
+ * @param {{x: number, y: number}} scale - Scale values
+ * @param {number} rotation - Rotation in degrees
+ * @param {{x: number, y: number}} flipped - Flip flags (0 or 1)
+ * @returns {Canvas} The transformed canvas
+ */
+function transformPiece(image, scale, rotation, flipped) {
+    if (!image || image.width === 0 || image.height === 0) {
+        return image;
+    }
+    
+    const w = image.width;
+    const h = image.height;
+    
+    // Apply scale
+    const scaledW = Math.max(1, Math.round(w * scale.x));
+    const scaledH = Math.max(1, Math.round(h * scale.y));
+    
+    const scaled = createCanvas(scaledW, scaledH);
+    const scaledCtx = scaled.getContext('2d');
+    scaledCtx.clearRect(0, 0, scaledW, scaledH);
+    scaledCtx.drawImage(image, 0, 0, w, h, 0, 0, scaledW, scaledH);
+    
+    // Apply flip (like PHP imageflip - simpler approach)
+    // PHP: if (($flipped['x'] ?? 0) == 1) { imageflip($scaled, IMG_FLIP_HORIZONTAL); }
+    // PHP: if (($flipped['y'] ?? 0) == 1) { imageflip($scaled, IMG_FLIP_VERTICAL); }
+    let finalScaled = scaled;
+    if ((flipped.x || 0) === 1) {
+        const flippedCanvas = createCanvas(scaledW, scaledH);
+        const flippedCtx = flippedCanvas.getContext('2d');
+        flippedCtx.clearRect(0, 0, scaledW, scaledH);
+        flippedCtx.translate(scaledW, 0);
+        flippedCtx.scale(-1, 1);
+        flippedCtx.drawImage(scaled, 0, 0);
+        finalScaled = flippedCanvas;
+    }
+    if ((flipped.y || 0) === 1) {
+        const flippedCanvas = createCanvas(finalScaled.width, finalScaled.height);
+        const flippedCtx = flippedCanvas.getContext('2d');
+        flippedCtx.clearRect(0, 0, finalScaled.width, finalScaled.height);
+        flippedCtx.translate(0, finalScaled.height);
+        flippedCtx.scale(1, -1);
+        flippedCtx.drawImage(finalScaled, 0, 0);
+        finalScaled = flippedCanvas;
+    }
+    
+    // Apply rotation (after scale and flip)
+    // PHP: $rotated = @imagerotate($scaled, -$normalizedRotation, $transparent);
+    // imagerotate rotates counter-clockwise for positive angles, but we pass negative
+    // So -$normalizedRotation means: if rotation is positive, we rotate clockwise
+    if (Math.abs(rotation) > 0.01) {
+        // Normalize rotation to -180 to 180 range (like PHP fmod)
+        let normalizedRotation = rotation % 360;
+        if (normalizedRotation > 180) {
+            normalizedRotation -= 360;
+        } else if (normalizedRotation < -180) {
+            normalizedRotation += 360;
+        }
+        
+        // Only rotate if significant (handle near-360 rotations as near-0)
+        if (Math.abs(normalizedRotation) > 0.1) {
+            const rotW = finalScaled.width;
+            const rotH = finalScaled.height;
+            
+            // Double-check dimensions are valid and reasonable
+            if (rotW > 0 && rotH > 0 && rotW <= 10000 && rotH <= 10000) {
+                // PHP uses -$normalizedRotation, so we need to negate it
+                // imagerotate rotates counter-clockwise for positive, so -angle rotates clockwise
+                // Canvas rotate() rotates clockwise for positive, so we use the angle directly (not negated)
+                const rad = (normalizedRotation * Math.PI) / 180;
+                
+                // Calculate rotated dimensions (imagerotate creates a canvas that fits the rotated image)
+                const cos = Math.abs(Math.cos(rad));
+                const sin = Math.abs(Math.sin(rad));
+                const newW = Math.ceil(rotW * cos + rotH * sin);
+                const newH = Math.ceil(rotW * sin + rotH * cos);
+                
+                if (newW > 0 && newH > 0) {
+                    const rotated = createCanvas(newW, newH);
+                    const rotatedCtx = rotated.getContext('2d');
+                    rotatedCtx.clearRect(0, 0, newW, newH);
+                    
+                // Rotate around center (like imagerotate does)
+                // PHP: $rotated = @imagerotate($scaled, -$normalizedRotation, $transparent);
+                // imagerotate rotates COUNTER-CLOCKWISE for positive angles
+                // So -$normalizedRotation means: if normalizedRotation is 30, we pass -30
+                // imagerotate with -30 rotates 30 degrees CLOCKWISE
+                // Canvas rotate() with positive angle rotates CLOCKWISE
+                // So to match PHP's -$normalizedRotation, we use rad directly (not negated)
+                // Because: PHP's -30 -> imagerotate rotates 30° clockwise -> Canvas rotate(30°) also rotates 30° clockwise
+                rotatedCtx.translate(newW / 2, newH / 2);
+                rotatedCtx.rotate(rad); // Use rad directly to match PHP's -$normalizedRotation behavior
+                rotatedCtx.translate(-rotW / 2, -rotH / 2);
+                rotatedCtx.drawImage(finalScaled, 0, 0);
+                    
+                    return rotated;
+                }
+            }
+        }
+    }
+    
+    return finalScaled;
+}
+
+/**
+ * Darkens an image by a given factor (0.0 to 1.0)
+ * Factor 1.0 = no change, 0.5 = 50% brightness, 0.0 = black
+ * @param {Canvas} image - The source canvas
+ * @param {number} factor - Darkening factor (1.0 = no change, lower = darker)
+ * @returns {Canvas} The darkened canvas
+ */
+function darkenImage(image, factor) {
+    if (!image || image.width === 0 || image.height === 0) {
+        return image;
+    }
+    
+    const w = image.width;
+    const h = image.height;
+    const darkened = createCanvas(w, h);
+    const ctx = darkened.getContext('2d');
+    
+    // Get source image data first
+    const sourceCtx = image.getContext('2d');
+    const sourceImageData = sourceCtx.getImageData(0, 0, w, h);
+    const sourceData = sourceImageData.data;
+    
+    // Create new image data for darkened image
+    const imageData = ctx.createImageData(w, h);
+    const data = imageData.data;
+    
+    // Process each pixel
+    // PHP: if ($a < 127) - only darken non-transparent pixels
+    // In GD: alpha 0 = opaque, alpha 127 = transparent
+    // In Canvas: alpha 0 = transparent, alpha 255 = opaque
+    // PHP checks: if ($a < 127) means "not fully transparent" = "has some opacity"
+    // In Canvas, this translates to: if (alpha > 0) means "not fully transparent" = "has some opacity"
+    for (let i = 0; i < data.length; i += 4) {
+        const r = sourceData[i];
+        const g = sourceData[i + 1];
+        const b = sourceData[i + 2];
+        const alpha = sourceData[i + 3];
+        
+        // Only darken non-transparent pixels (PHP: if ($a < 127))
+        // In Canvas, alpha 0 = fully transparent, alpha 255 = fully opaque
+        // So we check alpha > 0 to detect pixels with any opacity
+        if (alpha > 0) {
+            // Apply darkening factor (PHP: $r = (int)($r * $factor))
+            // PHP keeps the same alpha value, so we keep alpha unchanged
+            data[i] = Math.max(0, Math.min(255, Math.round(r * factor)));     // R
+            data[i + 1] = Math.max(0, Math.min(255, Math.round(g * factor))); // G
+            data[i + 2] = Math.max(0, Math.min(255, Math.round(b * factor))); // B
+            data[i + 3] = alpha; // Keep original alpha unchanged (PHP: $a stays the same)
+        } else {
+            // Keep full transparency (PHP: imagesetpixel with alpha 127 = transparent)
+            // In Canvas, alpha 0 = fully transparent
+            data[i] = 0;
+            data[i + 1] = 0;
+            data[i + 2] = 0;
+            data[i + 3] = 0; // Fully transparent
+        }
+    }
+    
+    // Put the modified image data back
+    ctx.putImageData(imageData, 0, 0);
+    return darkened;
+}
+
+/**
+ * Icon builder that handles both multipart icons (Robot/Spider) and simple icons
+ * For multipart icons, composes multiple pieces based on an AnimDesc JSON file
+ * For simple icons, uses generateIcon directly
+ * This function uses generateIcon as a provider for individual pieces
+ * @param {number} iconType - The icon type (5 for Robot, 6 for Spider, others for simple icons)
+ * @param {number} iconID - The icon ID to use
+ * @param {number} color1 - Primary color ID
+ * @param {number} color2 - Secondary color ID
+ * @param {number} color3 - Glow color ID
+ * @param {boolean} glowEnabled - Whether glow is enabled
+ * @param {string|null} imageRes - Image resolution quality ('uhd', 'hd', '' for low, or null for auto-detect)
+ * @returns {Promise<Canvas|null>} A canvas for the icon, or null on failure
+ */
+async function buildIcon(iconType, iconID, color1, color2, color3, glowEnabled, imageRes = null) {
+    // Default to 'hd' (medium quality) if imageRes is null
+    if (imageRes === null) {
+        imageRes = 'hd';
+    }
+    
+    // Determine AnimDesc key name from iconType
+    const animDescKeyMap = {
+        5: 'robot',
+        6: 'spider'
+    };
+    
+    // Map icon types to names
+    const typeNames = {
+        0: 'player', 1: 'ship', 2: 'player_ball', 3: 'bird',
+        4: 'dart', 5: 'robot', 6: 'spider', 7: 'swing', 8: 'jetpack'
+    };
+    const typeName = typeNames[iconType] || 'player';
+    
+    // If not a multipart icon type, use generateIcon directly
+    if (!animDescKeyMap[iconType]) {
+        const iconArray = await generateIcon(
+            iconType,
+            iconID,
+            color1,
+            color2,
+            color3,
+            glowEnabled,
+            null,
+            false,
+            imageRes
+        );
+        
+        if (!iconArray) return null;
+        
+        // Get the full icon or first piece
+        const iconImage = iconArray['full'] || Object.values(iconArray)[0];
+        
+        if (!iconImage) return null;
+        
+        // Crop to edges to remove any extra transparent space
+        return cropToEdges(iconImage);
+    }
+    
+    const animDescKey = animDescKeyMap[iconType];
+    
+    // Load AnimDesc JSON file
+    const jsonPath = path.join(resourcesPath, 'AnimDesc.json');
+    if (!fs.existsSync(jsonPath)) {
+        return null;
+    }
+    
+    const jsonContent = fs.readFileSync(jsonPath, 'utf8');
+    const animDescData = JSON.parse(jsonContent);
+    if (!animDescData || !animDescData[animDescKey]) {
+        return null;
+    }
+    
+    // Get the sprite data for the requested icon type
+    const animDesc = animDescData[animDescKey];
+    
+    if (!animDesc || Object.keys(animDesc).length === 0) {
+        return null;
+    }
+    
+    // Parse sprites and apply transformations (without glow first)
+    const sprites = [];
+    const glowSprites = [];
+    
+    for (const spriteKey of Object.keys(animDesc)) {
+        const spriteData = animDesc[spriteKey];
+        
+        // Extract data
+        const pieceNum = parseInt(spriteData.piece);
+        const position = parseVector2(spriteData.position);
+        const scale = parseVector2(spriteData.scale);
+        const rotation = parseFloat(spriteData.rotation);
+        const flipped = parseVector2(spriteData.flipped);
+        const zValue = parseInt(spriteData.zValue);
+        
+        // Get piece from generateIcon (without glow)
+        const iconResult = await generateIcon(
+            iconType,
+            iconID,
+            color1,
+            color2,
+            color3,
+            false, // No glow for main pieces
+            pieceNum,
+            false, // glowOnly = false
+            imageRes
+        );
+        
+        if (iconResult) {
+            // Get the piece (it should be in the array with key matching the piece number)
+            const pieceKey = String(pieceNum).padStart(2, '0');
+            const originalPiece = iconResult[pieceKey] || Object.values(iconResult)[0];
+            
+            if (originalPiece) {
+                // Crop piece to edges to remove empty space before transformation
+                const piece = cropToEdges(originalPiece);
+                
+                // Apply transformations
+                const transformed = transformPiece(piece, scale, rotation, flipped);
+                
+                sprites.push({
+                    image: transformed,
+                    position: position,
+                    scale: scale,
+                    flipped: flipped,
+                    rotation: rotation,
+                    piece: pieceNum,
+                    zValue: zValue
+                });
+                
+                // Clean up if cropped piece is different from original
+                if (piece !== originalPiece) {
+                    // Canvas cleanup handled by GC
+                }
+            }
+        }
+        
+        // Get glow piece if glow is enabled
+        if (glowEnabled) {
+            const glowResult = await generateIcon(
+                iconType,
+                iconID,
+                color1,
+                color2,
+                color3,
+                true, // Glow enabled
+                pieceNum,
+                true, // glowOnly = true
+                imageRes
+            );
+            
+            if (glowResult) {
+                const pieceKey = String(pieceNum).padStart(2, '0');
+                const originalGlowPiece = glowResult[pieceKey] || Object.values(glowResult)[0];
+                
+                if (originalGlowPiece) {
+                    // Crop glow piece to edges to remove empty space before transformation
+                    const glowPiece = cropToEdges(originalGlowPiece);
+                    
+                    // Apply same transformations
+                    const transformedGlow = transformPiece(glowPiece, scale, rotation, flipped);
+                    
+                    glowSprites.push({
+                        image: transformedGlow,
+                        position: position,
+                        scale: scale,
+                        flipped: flipped,
+                        rotation: rotation,
+                        piece: pieceNum,
+                        zValue: -1 // Glow goes behind everything
+                    });
+                    
+                    // Clean up if cropped glow piece is different from original
+                    if (glowPiece !== originalGlowPiece) {
+                        // Canvas cleanup handled by GC
+                    }
+                }
+            }
+        }
+    }
+    
+    if (sprites.length === 0 && glowSprites.length === 0) {
+        return null;
+    }
+    
+    // Combine glow sprites (behind) with main sprites
+    const allSprites = [...glowSprites, ...sprites];
+    
+    // Sort by zValue (ascending - lower zValue renders first/behind)
+    allSprites.sort((a, b) => a.zValue - b.zValue);
+    
+    // Calculate scale factors based on image resolution
+    // AnimDesc coordinates are based on HD (2x scale)
+    // Quality scales: '' = 1x (low), 'hd' = 2x (medium), 'uhd' = 4x (high)
+    let qualityScale = 2.0; // Default to HD (2x)
+    if (imageRes === '') {
+        qualityScale = 1.0; // Low quality (1x)
+    } else if (imageRes === 'uhd') {
+        qualityScale = 4.0; // UHD quality (4x)
+    } else if (imageRes === 'hd') {
+        qualityScale = 2.0; // HD quality (2x)
+    }
+    // If imageRes is null, use the actual loaded quality from generateIcon
+    // We'll default to HD (2x) in this case
+    
+    // Base constants for HD (2x scale)
+    const BASE_ICON_SIZE = 300;
+    const BASE_SCALE_FACTOR = 2.15;
+    
+    // Scale constants based on quality
+    const ICON_SIZE = BASE_ICON_SIZE * (qualityScale / 2.0);
+    const SCALE_FACTOR = BASE_SCALE_FACTOR * (qualityScale / 2.0);
+    
+    // Calculate canvas size based on all transformed sprites
+    let minX = 9999;
+    let maxX = -9999;
+    let minY = 9999;
+    let maxY = -9999;
+    
+    for (const sprite of allSprites) {
+        // Image is already transformed (scaled, flipped, rotated)
+        const finalW = sprite.image.width;
+        const finalH = sprite.image.height;
+        const pos = sprite.position;
+        const scale = sprite.scale;
+        const flipped = sprite.flipped || { x: 0, y: 0 };
+        const pieceNum = sprite.piece || -1;
+        
+        // Apply Java transformation: translate(position.x * 4.0, -position.y * 4.0)
+        const translatedX = pos.x * SCALE_FACTOR;
+        const translatedY = -pos.y * SCALE_FACTOR; // Y is inverted
+        
+        // After scale, adjust center: translate(ICON_WIDTH * (1 / (2 * scale.x) - 0.5), ...)
+        // Avoid division by zero
+        const scaleX = scale.x !== 0 ? scale.x : 1.0;
+        const scaleY = scale.y !== 0 ? scale.y : 1.0;
+        let centerAdjustX = ICON_SIZE * ((1 / (2 * scaleX)) - 0.5);
+        let centerAdjustY = ICON_SIZE * ((1 / (2 * scaleY)) - 0.5);
+        
+        // For piece 02 (spider legs), try without center adjustment to fix displacement
+        let finalX, finalY;
+        if (pieceNum === 2) {
+            finalX = translatedX;
+            finalY = translatedY;
+        } else {
+            // If flipped horizontally, invert the center adjustment X
+            if ((flipped.x || 0) === 1) {
+                centerAdjustX = -centerAdjustX;
+            }
+            
+            finalX = translatedX + centerAdjustX;
+            finalY = translatedY + centerAdjustY;
+        }
+        
+        // Calculate bounding box (position is center, use final dimensions)
+        // For rotated images, we need to consider the diagonal to ensure we capture all corners
+        const halfW = finalW / 2;
+        const halfH = finalH / 2;
+        
+        // If rotated, calculate diagonal distance to ensure we capture all corners
+        const rotation = sprite.rotation || 0;
+        let x1, x2, y1, y2;
+        if (rotation !== 0) {
+            // Calculate diagonal to handle rotation
+            const diagonal = Math.sqrt(halfW * halfW + halfH * halfH);
+            x1 = finalX - diagonal;
+            x2 = finalX + diagonal;
+            y1 = finalY - diagonal;
+            y2 = finalY + diagonal;
+        } else {
+            x1 = finalX - halfW;
+            x2 = finalX + halfW;
+            y1 = finalY - halfH;
+            y2 = finalY + halfH;
+        }
+        
+        if (x1 < minX) minX = x1;
+        if (x2 > maxX) maxX = x2;
+        if (y1 < minY) minY = y1;
+        if (y2 > maxY) maxY = y2;
+        
+        // Special handling for spider (iconType 6) piece 02 - ensure we capture bottom edge correctly
+        if (pieceNum === 2) {
+            // For spider legs (piece 02), add extra buffer to bottom to ensure we capture all pixels
+            const extraBottom = finalH * 0.5; // 50% extra buffer for bottom
+            const y2WithBuffer = y2 + extraBottom;
+            if (y2WithBuffer > maxY) maxY = y2WithBuffer;
+        }
+    }
+    
+    // Calculate canvas dimensions with padding to avoid clipping
+    // Scale padding based on quality (like everything else)
+    // Base padding of 50 for HD (2x), so scale accordingly
+    const basePadding = 50;
+    const padding = Math.ceil(basePadding * (qualityScale / 2.0));
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    
+    // Ensure minimum size
+    const canvasW = Math.max(1, Math.ceil(contentWidth + (padding * 2)));
+    const canvasH = Math.max(1, Math.ceil(contentHeight + (padding * 2)));
+    
+    // Calculate offset to position content with padding
+    const offsetX = -minX + padding;
+    const offsetY = -minY + padding;
+    
+    // Create canvas with padding (we'll crop it later)
+    const canvas = createCanvas(canvasW, canvasH);
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvasW, canvasH);
+    
+    // Render all sprites (glow first, then main pieces)
+    // Darkening factor for first 3 non-glow sprites
+    const darkeningFactor = 0.50; // 50% brightness (50% darker)
+    
+    // Count non-glow sprites to identify first 3
+    let nonGlowSpriteIndex = 0;
+    
+    for (const sprite of allSprites) {
+        let img = sprite.image;
+        const zValue = sprite.zValue || 0;
+        const pos = sprite.position;
+        const scale = sprite.scale || { x: 1.0, y: 1.0 };
+        const flipped = sprite.flipped || { x: 0, y: 0 };
+        
+        // Darken first 3 non-glow sprites (zValue >= 0)
+        if (zValue >= 0) {
+            if (nonGlowSpriteIndex < 3) {
+                const darkenedImg = darkenImage(img, darkeningFactor);
+                if (darkenedImg && darkenedImg !== img) {
+                    img = darkenedImg;
+                }
+            }
+            nonGlowSpriteIndex++;
+        }
+        
+        const w = img.width;
+        const h = img.height;
+        
+        // Apply Java transformation logic
+        // 1. translate(position.x * 4.0, -position.y * 4.0)
+        const translatedX = pos.x * SCALE_FACTOR;
+        const translatedY = -pos.y * SCALE_FACTOR; // Y is inverted
+        
+        // 2. scale(scale.x, scale.y) - already applied in transformPiece
+        // 3. translate(ICON_WIDTH * (1 / (2 * scale.x) - 0.5), ICON_HEIGHT * (1 / (2 * scale.y) - 0.5))
+        const scaleX = scale.x !== 0 ? scale.x : 1.0;
+        const scaleY = scale.y !== 0 ? scale.y : 1.0;
+        let centerAdjustX = ICON_SIZE * ((1 / (2 * scaleX)) - 0.5);
+        let centerAdjustY = ICON_SIZE * ((1 / (2 * scaleY)) - 0.5);
+        
+        // Get piece number to check if special handling is needed
+        const pieceNum = sprite.piece || -1;
+        
+        // For piece 02 (spider legs), try without center adjustment to fix displacement
+        let finalX, finalY;
+        if (pieceNum === 2) {
+            finalX = translatedX;
+            finalY = translatedY;
+        } else {
+            // If flipped horizontally, invert the center adjustment X
+            if ((flipped.x || 0) === 1) {
+                centerAdjustX = -centerAdjustX;
+            }
+            
+            finalX = translatedX + centerAdjustX;
+            finalY = translatedY + centerAdjustY;
+        }
+        
+        // Get final dimensions (image is already scaled)
+        const finalW = img.width;
+        const finalH = img.height;
+        
+        // Convert to canvas coordinates (add offset to move from negative to positive)
+        // Position is center, so subtract half width/height
+        const canvasX = Math.round(finalX + offsetX - (finalW / 2));
+        const canvasY = Math.round(finalY + offsetY - (finalH / 2));
+        
+        ctx.drawImage(img, canvasX, canvasY);
+    }
+    
+    // Use getCropBounds to find actual content bounds and crop to remove all empty space
+    const cropData = getCropBounds(canvas);
+    if (cropData) {
+        const croppedCanvas = createCanvas(cropData.width, cropData.height);
+        const croppedCtx = croppedCanvas.getContext('2d');
+        croppedCtx.clearRect(0, 0, cropData.width, cropData.height);
+        
+        croppedCtx.drawImage(canvas, cropData.x, cropData.y, cropData.width, cropData.height,
+                            0, 0, cropData.width, cropData.height);
+        return croppedCanvas;
+    }
+    
+    return canvas;
 }
 
 module.exports = {

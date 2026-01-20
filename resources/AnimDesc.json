@@ -1,0 +1,110 @@
+{
+	"robot": {
+		"sprite_0": {
+			"piece": "03",
+			"position": "{-6.35, -7.5}",
+			"scale": "{0.99687, 0.99841}",
+			"rotation": "-29.67291259765625",
+			"flipped": "{0, 0}",
+			"zValue": "0"
+		},
+		"sprite_1": {
+			"piece": "02",
+			"position": "{-6.25, -1.575}",
+			"scale": "{0.99684, 0.99844}",
+			"rotation": "65.18263244628906",
+			"flipped": "{0, 0}",
+			"zValue": "1"
+		},
+		"sprite_2": {
+			"piece": "04",
+			"position": "{-2.675, -10.9}",
+			"scale": "{1.00000, 1.00000}",
+			"rotation": "0",
+			"flipped": "{0, 0}",
+			"zValue": "2"
+		},
+		"sprite_3": {
+			"piece": "01",
+			"position": "{1.275, 4.325}",
+			"scale": "{1, 1}",
+			"rotation": "0",
+			"flipped": "{0, 0}",
+			"zValue": "3"
+		},
+		"sprite_4": {
+			"piece": "03",
+			"position": "{-3.4, -7.55}",
+			"scale": "{1, 1}",
+			"rotation": "-40",
+			"flipped": "{0, 0}",
+			"zValue": "4"
+		},
+		"sprite_5": {
+			"piece": "02",
+			"position": "{-4.975, -2.425}",
+			"scale": "{1, 1}",
+			"rotation": "50",
+			"flipped": "{0, 0}",
+			"zValue": "5"
+		},
+		"sprite_6": {
+			"piece": "04",
+			"position": "{2.275, -10.9}",
+			"scale": "{1.00000, 1.00000}",
+			"rotation": "0",
+			"flipped": "{0, 0}",
+			"zValue": "6"
+		}
+	},
+	"spider": {
+		"sprite_0": {
+			"piece": "02",
+			"position": "{11, -6}",
+			"scale": "{0.995, 0.995}",
+			"rotation": "0",
+			"flipped": "{1, 0}",
+			"zValue": "0"
+		},
+		"sprite_1": {
+			"piece": "02",
+			"position": "{1, -6}",
+			"scale": "{0.995, 0.995}",
+			"rotation": "0",
+			"flipped": "{0, 0}",
+			"zValue": "1"
+		},
+		"sprite_2": {
+			"piece": "04",
+			"position": "{-4.5, 0.025}",
+			"scale": "{1, 1}",
+			"rotation": "-7.5",
+			"flipped": "{0, 0}",
+			"zValue": "2"
+		},
+		"sprite_3": {
+			"piece": "01",
+			"position": "{-2, 3.6}",
+			"scale": "{1, 1}",
+			"rotation": "0",
+			"flipped": "{0, 0}",
+			"zValue": "3"
+		},
+		"sprite_4": {
+			"piece": "03",
+			"position": "{-15, -7.1}",
+			"scale": "{1, 1}",
+			"rotation": "37",
+			"flipped": "{0, 0}",
+			"zValue": "4"
+		},
+		"sprite_5": {
+			"piece": "02",
+			"position": "{-6, -6}",
+			"scale": "{1, 1}",
+			"rotation": "-0.05",
+			"flipped": "{0, 0}",
+			"zValue": "5"
+		}
+	}
+}

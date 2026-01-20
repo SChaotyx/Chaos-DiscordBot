@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require('discord.js');
 const db = require('../utils/database');
 const { emojis, charCount, embedColor, timeElapsed } = require('../utils/gdpsUtils');
+const { generateProfileIconSet } = require('../utils/imageGenerator');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -111,6 +112,16 @@ async function executeAccount(interactionOrMessage, userName, authorId, channelI
             const thumbnailAttachment = new AttachmentBuilder(thumbnailBuffer, { name: 'user_button.png' });
             embed.setThumbnail('attachment://user_button.png');
             files.push(thumbnailAttachment);
+        }
+
+        // Generar iconset (sin jetpack)
+        if (profile) {
+            const iconSetBuffer = await generateProfileIconSet(accountID, null, false);
+            if (iconSetBuffer) {
+                const iconSetAttachment = new AttachmentBuilder(iconSetBuffer, { name: 'iconset.png' });
+                embed.setImage('attachment://iconset.png');
+                files.push(iconSetAttachment);
+            }
         }
 
         if (interactionOrMessage.isCommand?.()) {

@@ -17,3 +17,13 @@ CHANNEL_LOG=
 # ID del servidor de Discord (opcional, para registro inmediato de slash commands)
 # Si no se especifica, los comandos se registran globalmente (puede tardar hasta 1 hora)
 GUILD_ID=
+
+# ICON_PROFILE_QUALITY: Calidad de la imagen de perfil generada
+# Opciones: 'uhd' (alta), 'hd' (media), '' (baja - sin prefijo)
+# Dejar vacío para calidad más baja: ICON_PROFILE_QUALITY=
+ICON_PROFILE_QUALITY=hd
+
+# ICON_SET_QUALITY: Calidad de los iconos generados en el conjunto
+# Opciones: 'uhd' (alta), 'hd' (media), '' (baja - sin prefijo)
+# Dejar vacío para calidad más baja: ICON_SET_QUALITY=
+ICON_SET_QUALITY=hd

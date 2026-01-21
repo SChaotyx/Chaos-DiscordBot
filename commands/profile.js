@@ -116,7 +116,8 @@ async function buildProfileEmbed(targetAccID, tagID) {
 
         // Build embed
         const userTitle = `**:chart_with_upwards_trend: ${userStats.userName}'s stats**`;
-        const statsDisplay = `${emojis.icon_star} \`${charCount(userStats.stars)}\` \n ${emojis.icon_diamond} \`${charCount(userStats.diamonds)}\` \n ${emojis.icon_secretcoin} \`${charCount(userStats.coins)}\` \n ${emojis.icon_verifycoins} \`${charCount(userStats.userCoins)}\` \n ${emojis.icon_demon} \`${charCount(userStats.demons)}\` \n ${emojis.icon_cp} \`${charCount(userStats.creatorPoints)}\``;
+        const userMoons = (userStats.moons !== null && userStats.moons !== undefined) ? userStats.moons : 0;
+        const statsDisplay = `${emojis.icon_star} \`${charCount(userStats.stars)}\` \n ${emojis.icon_moon} \`${charCount(userMoons)}\` \n ${emojis.icon_secretcoin} \`${charCount(userStats.coins)}\` \n ${emojis.icon_verifycoins} \`${charCount(userStats.userCoins)}\` \n ${emojis.icon_demon} \`${charCount(userStats.demons)}\` \n ${emojis.icon_cp} \`${charCount(userStats.creatorPoints)}\` \n ${emojis.icon_diamond} \`${charCount(userStats.diamonds)}\``;
         const leaderboardInfo = rank + globalRank + creatorRank + socials;
         const userInfoFooter = ` | UserID: ${userStats.userID} | AccID: ${targetAccID}`;
 

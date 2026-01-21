@@ -57,6 +57,7 @@ async function executeAccount(interactionOrMessage, userName, authorId, channelI
             userID = profile.userID;
             PuserName = profile.userName;
             const userstars = profile.stars;
+            const usermoons = (profile.moons !== null && profile.moons !== undefined) ? profile.moons : 0;
             const userdiamonds = profile.diamonds;
             const userscoins = profile.coins;
             const userucoins = profile.userCoins;
@@ -71,7 +72,7 @@ async function executeAccount(interactionOrMessage, userName, authorId, channelI
             const banStatus = isbanned == 1 ? "Banned." : "No.";
             const cbanStatus = isCbanned == 1 ? "Banned." : "No.";
 
-            Pstats = `${emojis.icon_star} \`${userstars}\` | ${emojis.icon_diamond} \`${userdiamonds}\` | ${emojis.icon_secretcoin} \`${userscoins}\` | ${emojis.icon_verifycoins} \`${userucoins}\` \n ${emojis.icon_demon} \`${userdemons}\` | ${emojis.icon_cp} \`${usercp}\` | ${emojis.icon_orbs} \`${userorbs}\`\n───────────────────\n` +
+            Pstats = `${emojis.icon_star} \`${userstars}\` | ${emojis.icon_moon} \`${usermoons}\` | ${emojis.icon_secretcoin} \`${userscoins}\` | ${emojis.icon_verifycoins} \`${userucoins}\` \n ${emojis.icon_demon} \`${userdemons}\` | ${emojis.icon_cp} \`${usercp}\` | ${emojis.icon_diamond} \`${userdiamonds}\` | ${emojis.icon_orbs} \`${userorbs}\`\n───────────────────\n` +
                 `${emojis.icon_friends} **Friends Count:** \`${friends}\`\n` +
                 `${emojis.icon_length} **Last Time Online:** \`${timeElapsed(lastplayed)} ago\`\n` +
                 `${emojis.icon_play} **Completed Levels:** \`${completedLvls}\`\n` +

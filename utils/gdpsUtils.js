@@ -22,6 +22,7 @@ const emojis = {
     icon_youtube: "<:youtube:588249043596083200>",
     // PLAYER
     icon_star: "<:rate:588245546268098568>",
+    icon_moon: "<:moon:1463307687537152254>",
     icon_diamond: "<:diamond:588245544863006730>",
     icon_unverifycoins: "<:unverify:588245549107380244>",
     icon_verifycoins: "<:verify:588245548528697344>",
